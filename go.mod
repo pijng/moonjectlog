@@ -6,7 +6,7 @@ toolchain go1.22.2
 
 require (
 	github.com/dave/dst v0.27.3
-	github.com/pijng/moonject v0.0.12
+	github.com/pijng/moonject v0.0.13
 )
 
 require (
