@@ -6,12 +6,13 @@ import (
 	"strconv"
 
 	"github.com/dave/dst"
+	"github.com/dave/dst/decorator"
 	"github.com/pijng/moonject"
 )
 
 type logModifier struct{}
 
-func (lm logModifier) Modify(f *dst.File) *dst.File {
+func (lm logModifier) Modify(f *dst.File, dec *decorator.Decorator, res *decorator.Restorer) *dst.File {
 	for _, decl := range f.Decls {
 		decl, isFunc := decl.(*dst.FuncDecl)
 		if !isFunc {
