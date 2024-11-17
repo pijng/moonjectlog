@@ -7,7 +7,7 @@ import (
 
 	"github.com/dave/dst"
 	"github.com/dave/dst/decorator"
-	"github.com/pijng/moonject"
+	"github.com/pijng/goinject"
 )
 
 type logModifier struct{}
@@ -19,24 +19,73 @@ func (lm logModifier) Modify(f *dst.File, dec *decorator.Decorator, res *decorat
 			continue
 		}
 
-		span := buildSpan(decl.Name.Name)
-		decl.Body.List = append(span, decl.Body.List...)
+		spanStmt := buildSpan(decl.Name.Name)
+		decl.Body.List = append(spanStmt.List, decl.Body.List...)
 	}
 
 	return f
 }
 
 func main() {
-	moonject.Process(logModifier{})
+	goinject.Process(logModifier{})
 }
 
-func buildSpan(funcName string) []dst.Stmt {
-	return []dst.Stmt{
-		&dst.ExprStmt{
-			X: &dst.CallExpr{
-				Fun: &dst.Ident{Path: "fmt", Name: "Println"},
-				Args: []dst.Expr{
-					&dst.BasicLit{Kind: token.STRING, Value: strconv.Quote(fmt.Sprintf("Calling [%s] func", funcName))},
+func buildSpan(funcName string) dst.BlockStmt {
+	return dst.BlockStmt{
+		List: []dst.Stmt{
+			&dst.AssignStmt{
+				Lhs: []dst.Expr{
+					&dst.Ident{Name: "now"},
+				},
+				Tok: token.DEFINE,
+				Rhs: []dst.Expr{
+					&dst.CallExpr{
+						Fun:  &dst.Ident{Path: "time", Name: "Now"},
+						Args: []dst.Expr{},
+					},
+				},
+			},
+			&dst.DeferStmt{
+				Call: &dst.CallExpr{
+					Fun: &dst.FuncLit{
+						Type: &dst.FuncType{
+							Params: &dst.FieldList{
+								List: []*dst.Field{
+									{
+										Names: []*dst.Ident{{Name: "t"}},
+										Type: &dst.SelectorExpr{
+											X:   &dst.Ident{Name: "time"},
+											Sel: &dst.Ident{Name: "Time"},
+										},
+									},
+								},
+							},
+						},
+						Body: &dst.BlockStmt{
+							List: []dst.Stmt{
+								&dst.ExprStmt{
+									X: &dst.CallExpr{
+										Fun: &dst.Ident{Path: "fmt", Name: "Println"},
+										Args: []dst.Expr{
+											&dst.BasicLit{Kind: token.STRING, Value: strconv.Quote(fmt.Sprintf("[%s] took: ", funcName))},
+											&dst.CallExpr{
+												Fun: &dst.SelectorExpr{
+													X:   &dst.Ident{Name: "time"},
+													Sel: &dst.Ident{Name: "Since"},
+												},
+												Args: []dst.Expr{
+													&dst.Ident{Name: "t"},
+												},
+											},
+										},
+									},
+								},
+							},
+						},
+					},
+					Args: []dst.Expr{
+						&dst.Ident{Name: "now"},
+					},
 				},
 			},
 		},
