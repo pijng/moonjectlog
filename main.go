@@ -1,93 +1,84 @@
-package main
+package gomeasure
 
 import (
+	"context"
 	"fmt"
-	"go/token"
-	"strconv"
-
-	"github.com/dave/dst"
-	"github.com/dave/dst/decorator"
-	"github.com/pijng/goinject"
+	"strings"
+	"sync"
+	"time"
 )
 
-type logModifier struct{}
-
-func (lm logModifier) Modify(f *dst.File, dec *decorator.Decorator, res *decorator.Restorer) *dst.File {
-	for _, decl := range f.Decls {
-		decl, isFunc := decl.(*dst.FuncDecl)
-		if !isFunc {
-			continue
-		}
-
-		spanStmt := buildSpan(decl.Name.Name)
-		decl.Body.List = append(spanStmt.List, decl.Body.List...)
-	}
-
-	return f
+type Span struct {
+	Name     string
+	Start    time.Time
+	Children []*Span
+	Parent   *Span // Add Parent field
+	Ctx      context.Context
+	mu       sync.Mutex
 }
 
-func main() {
-	goinject.Process(logModifier{})
+type traceKeyType string
+
+const traceKey traceKeyType = "trace"
+
+// NewSpan creates a new span
+func newSpan(ctx context.Context, name string, parent *Span) *Span {
+	return &Span{
+		Name:     name,
+		Start:    time.Now(),
+		Children: make([]*Span, 0),
+		Parent:   parent,
+		Ctx:      ctx,
+	}
 }
 
-func buildSpan(funcName string) dst.BlockStmt {
-	return dst.BlockStmt{
-		List: []dst.Stmt{
-			&dst.AssignStmt{
-				Lhs: []dst.Expr{
-					&dst.Ident{Name: "now"},
-				},
-				Tok: token.DEFINE,
-				Rhs: []dst.Expr{
-					&dst.CallExpr{
-						Fun:  &dst.Ident{Path: "time", Name: "Now"},
-						Args: []dst.Expr{},
-					},
-				},
-			},
-			&dst.DeferStmt{
-				Call: &dst.CallExpr{
-					Fun: &dst.FuncLit{
-						Type: &dst.FuncType{
-							Params: &dst.FieldList{
-								List: []*dst.Field{
-									{
-										Names: []*dst.Ident{{Name: "t"}},
-										Type: &dst.SelectorExpr{
-											X:   &dst.Ident{Name: "time"},
-											Sel: &dst.Ident{Name: "Time"},
-										},
-									},
-								},
-							},
-						},
-						Body: &dst.BlockStmt{
-							List: []dst.Stmt{
-								&dst.ExprStmt{
-									X: &dst.CallExpr{
-										Fun: &dst.Ident{Path: "fmt", Name: "Println"},
-										Args: []dst.Expr{
-											&dst.BasicLit{Kind: token.STRING, Value: strconv.Quote(fmt.Sprintf("[%s] took: ", funcName))},
-											&dst.CallExpr{
-												Fun: &dst.SelectorExpr{
-													X:   &dst.Ident{Name: "time"},
-													Sel: &dst.Ident{Name: "Since"},
-												},
-												Args: []dst.Expr{
-													&dst.Ident{Name: "t"},
-												},
-											},
-										},
-									},
-								},
-							},
-						},
-					},
-					Args: []dst.Expr{
-						&dst.Ident{Name: "now"},
-					},
-				},
-			},
-		},
+// AddChild adds a child span to the current span
+func (s *Span) addChild(child *Span) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.Children = append(s.Children, child)
+}
+
+// Print outputs the span and its children with indentation
+func (s *Span) print(indent int) {
+	fmt.Printf("%s%s - %v\n", strings.Repeat("  ", indent), s.Name, time.Since(s.Start))
+	for _, child := range s.Children {
+		child.print(indent + 1)
 	}
+	if indent == 0 {
+		fmt.Println("------")
+	}
+}
+
+// StartSpan creates a new span and attaches it to the parent span in the context
+func StartSpan(name string) *Span {
+	ctx, err := getContext()
+	if err != nil {
+		panic(err)
+	}
+
+	parentSpan, _ := ctx.Value(traceKey).(*Span)
+	newSpan := newSpan(ctx, name, parentSpan)
+	if parentSpan != nil {
+		newSpan.Ctx = parentSpan.Ctx
+		parentSpan.addChild(newSpan)
+	} else {
+		newSpan.Ctx = ctx
+	}
+
+	ctx = context.WithValue(ctx, traceKey, newSpan)
+	err = setContext(ctx)
+	if err != nil {
+		panic(err)
+	}
+
+	return newSpan
+}
+
+func (s *Span) End() {
+	if s.Parent != nil {
+		return
+	}
+
+	s.print(0)
 }

@@ -1,4 +1,4 @@
-module github.com/pijng/moonjectlog
+module github.com/pijng/gomeasure
 
 go 1.22.0
 
